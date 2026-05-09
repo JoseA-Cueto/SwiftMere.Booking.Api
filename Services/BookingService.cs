@@ -152,11 +152,12 @@ public sealed partial class BookingService(
         var localStart = TimeZoneInfo.ConvertTime(start, rules.TimeZoneInfo);
         var localEnd = TimeZoneInfo.ConvertTime(end, rules.TimeZoneInfo);
         var startTime = localStart.TimeOfDay;
-        var endTime = localEnd.TimeOfDay;
+        var windowStart = localStart.Date.Add(rules.WorkdayStart);
+        var windowEnd = localStart.Date.Add(rules.WorkdayEnd);
 
         if (!_options.WorkDays.Contains((int)localStart.DayOfWeek) ||
-            startTime < rules.WorkdayStart ||
-            endTime > rules.WorkdayEnd)
+            localStart.DateTime < windowStart ||
+            localEnd.DateTime > windowEnd)
         {
             throw new ApiException(StatusCodes.Status400BadRequest, "This slot is outside booking hours.");
         }
@@ -214,8 +215,8 @@ public sealed partial class BookingService(
             throw new ApiException(StatusCodes.Status500InternalServerError, "Booking configuration is invalid.");
         }
 
-        if (!TimeSpan.TryParseExact(_options.WorkdayStart, "hh\\:mm", CultureInfo.InvariantCulture, out var workdayStart) ||
-            !TimeSpan.TryParseExact(_options.WorkdayEnd, "hh\\:mm", CultureInfo.InvariantCulture, out var workdayEnd) ||
+        if (!TryParseBookingTime(_options.WorkdayStart, allowEndOfDay: false, out var workdayStart) ||
+            !TryParseBookingTime(_options.WorkdayEnd, allowEndOfDay: true, out var workdayEnd) ||
             workdayStart >= workdayEnd)
         {
             throw new ApiException(StatusCodes.Status500InternalServerError, "Booking hours configuration is invalid.");
@@ -245,6 +246,18 @@ public sealed partial class BookingService(
         var culture = CultureInfo.GetCultureInfo(lang == "en" ? "en-US" : "es-ES");
         var localStart = TimeZoneInfo.ConvertTime(start, timeZoneInfo);
         return localStart.ToString("dddd, d MMMM yyyy HH:mm", culture);
+    }
+
+    private static bool TryParseBookingTime(string value, bool allowEndOfDay, out TimeSpan time)
+    {
+        if (allowEndOfDay &&
+            value.Trim().Equals("24:00", StringComparison.Ordinal))
+        {
+            time = TimeSpan.FromDays(1);
+            return true;
+        }
+
+        return TimeSpan.TryParseExact(value, "hh\\:mm", CultureInfo.InvariantCulture, out time);
     }
 
     private static string Clean(string value, int maxLength)
