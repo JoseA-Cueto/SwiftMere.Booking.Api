@@ -17,6 +17,8 @@ public sealed class GoogleCalendarClient(
     private const string TokenEndpoint = "https://oauth2.googleapis.com/token";
     private const string CalendarApiBase = "https://www.googleapis.com/calendar/v3";
     private const string CalendarScope = "https://www.googleapis.com/auth/calendar";
+    private const string ServiceAccountAuthMode = "ServiceAccount";
+    private const string OAuthAuthMode = "OAuth";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -220,6 +222,32 @@ public sealed class GoogleCalendarClient(
         EnsureConfigured();
 
         var now = DateTimeOffset.UtcNow;
+        var authMode = GetAuthMode();
+        logger.LogInformation(
+            "Requesting Google Calendar access token using {AuthMode} auth mode.",
+            authMode);
+
+        var tokenResponse = IsOAuthMode(authMode)
+            ? await GetOAuthAccessTokenAsync(cancellationToken)
+            : await GetServiceAccountAccessTokenAsync(now, cancellationToken);
+
+        if (string.IsNullOrWhiteSpace(tokenResponse.AccessToken))
+        {
+            throw new ApiException(
+                StatusCodes.Status502BadGateway,
+                "Scheduling provider did not return an access token.");
+        }
+
+        _accessToken = tokenResponse.AccessToken;
+        _accessTokenExpiresAt = now.AddSeconds(tokenResponse.ExpiresIn <= 0 ? 3600 : tokenResponse.ExpiresIn);
+
+        return _accessToken;
+    }
+
+    private async Task<GoogleTokenResponse> GetServiceAccountAccessTokenAsync(
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
         var header = new
         {
             alg = "RS256",
@@ -247,13 +275,35 @@ public sealed class GoogleCalendarClient(
 
         var token = $"{unsignedToken}.{Base64UrlEncode(signature)}";
 
-        using var response = await httpClient.PostAsync(
-            TokenEndpoint,
-            new FormUrlEncodedContent(new Dictionary<string, string>
+        return await RequestGoogleAccessTokenAsync(
+            new Dictionary<string, string>
             {
                 ["grant_type"] = "urn:ietf:params:oauth:grant-type:jwt-bearer",
                 ["assertion"] = token,
-            }),
+            },
+            cancellationToken);
+    }
+
+    private async Task<GoogleTokenResponse> GetOAuthAccessTokenAsync(CancellationToken cancellationToken)
+    {
+        return await RequestGoogleAccessTokenAsync(
+            new Dictionary<string, string>
+            {
+                ["client_id"] = _calendarOptions.ClientId,
+                ["client_secret"] = _calendarOptions.ClientSecret,
+                ["refresh_token"] = _calendarOptions.RefreshToken,
+                ["grant_type"] = "refresh_token",
+            },
+            cancellationToken);
+    }
+
+    private async Task<GoogleTokenResponse> RequestGoogleAccessTokenAsync(
+        Dictionary<string, string> form,
+        CancellationToken cancellationToken)
+    {
+        using var response = await httpClient.PostAsync(
+            TokenEndpoint,
+            new FormUrlEncodedContent(form),
             cancellationToken);
 
         var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -272,29 +322,77 @@ public sealed class GoogleCalendarClient(
         }
 
         var tokenResponse = JsonSerializer.Deserialize<GoogleTokenResponse>(responseBody, JsonOptions);
-        if (string.IsNullOrWhiteSpace(tokenResponse?.AccessToken))
+        if (tokenResponse is null)
         {
             throw new ApiException(
                 StatusCodes.Status502BadGateway,
-                "Scheduling provider did not return an access token.");
+                "Scheduling provider returned an empty token response.");
         }
 
-        _accessToken = tokenResponse.AccessToken;
-        _accessTokenExpiresAt = now.AddSeconds(tokenResponse.ExpiresIn <= 0 ? 3600 : tokenResponse.ExpiresIn);
-
-        return _accessToken;
+        return tokenResponse;
     }
 
     private void EnsureConfigured()
     {
-        if (string.IsNullOrWhiteSpace(_calendarOptions.ServiceAccountEmail) ||
-            string.IsNullOrWhiteSpace(_calendarOptions.PrivateKey) ||
-            string.IsNullOrWhiteSpace(_calendarOptions.CalendarId))
+        var authMode = GetAuthMode();
+        var isConfigured = IsOAuthMode(authMode)
+            ? IsOAuthConfigured()
+            : IsServiceAccountConfigured();
+
+        if (!isConfigured)
         {
+            logger.LogWarning(
+                "Google Calendar is not configured for {AuthMode} auth mode.",
+                authMode);
+
             throw new ApiException(
                 StatusCodes.Status503ServiceUnavailable,
                 "Scheduling provider is not configured.");
         }
+    }
+
+    private bool IsServiceAccountConfigured()
+    {
+        return !string.IsNullOrWhiteSpace(_calendarOptions.ServiceAccountEmail) &&
+            !string.IsNullOrWhiteSpace(_calendarOptions.PrivateKey) &&
+            !string.IsNullOrWhiteSpace(_calendarOptions.CalendarId);
+    }
+
+    private bool IsOAuthConfigured()
+    {
+        return !string.IsNullOrWhiteSpace(_calendarOptions.ClientId) &&
+            !string.IsNullOrWhiteSpace(_calendarOptions.ClientSecret) &&
+            !string.IsNullOrWhiteSpace(_calendarOptions.RefreshToken) &&
+            !string.IsNullOrWhiteSpace(_calendarOptions.CalendarId);
+    }
+
+    private string GetAuthMode()
+    {
+        var authMode = string.IsNullOrWhiteSpace(_calendarOptions.AuthMode)
+            ? ServiceAccountAuthMode
+            : _calendarOptions.AuthMode.Trim();
+
+        if (IsOAuthMode(authMode))
+        {
+            return OAuthAuthMode;
+        }
+
+        if (authMode.Equals(ServiceAccountAuthMode, StringComparison.OrdinalIgnoreCase))
+        {
+            return ServiceAccountAuthMode;
+        }
+
+        logger.LogWarning(
+            "Unsupported Google Calendar auth mode {AuthMode}. Falling back to {DefaultAuthMode}.",
+            authMode,
+            ServiceAccountAuthMode);
+
+        return ServiceAccountAuthMode;
+    }
+
+    private static bool IsOAuthMode(string authMode)
+    {
+        return authMode.Equals(OAuthAuthMode, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string NormalizePrivateKey(string value)
