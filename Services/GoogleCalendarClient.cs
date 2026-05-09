@@ -70,7 +70,7 @@ public sealed class GoogleCalendarClient(
 
         var createMeet = draft.MeetingType == MeetingTypes.GoogleMeet;
         var eventPayload = BuildEventPayload(draft, createMeet);
-        var path = $"/calendars/{Uri.EscapeDataString(_calendarOptions.CalendarId)}/events?conferenceDataVersion=1&sendUpdates=all";
+        var path = $"/calendars/{Uri.EscapeDataString(_calendarOptions.CalendarId)}/events?conferenceDataVersion=1";
 
         var created = await SendGoogleAsync<GoogleCalendarEventResponse>(
             HttpMethod.Post,
@@ -118,14 +118,6 @@ public sealed class GoogleCalendarClient(
             {
                 dateTime = draft.End.UtcDateTime.ToString("O"),
                 timeZone = _bookingOptions.TimeZone,
-            },
-            attendees = new[]
-            {
-                new
-                {
-                    email = draft.Email,
-                    displayName = draft.Name,
-                },
             },
             guestsCanInviteOthers = false,
             reminders = new
