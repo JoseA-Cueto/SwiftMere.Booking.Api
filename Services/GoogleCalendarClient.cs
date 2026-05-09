@@ -69,14 +69,43 @@ public sealed class GoogleCalendarClient(
         EnsureConfigured();
 
         var createMeet = draft.MeetingType == MeetingTypes.GoogleMeet;
-        var eventPayload = BuildEventPayload(draft, createMeet);
-        var path = $"/calendars/{Uri.EscapeDataString(_calendarOptions.CalendarId)}/events?conferenceDataVersion=1";
+        var plainEventPath = $"/calendars/{Uri.EscapeDataString(_calendarOptions.CalendarId)}/events";
+        var conferenceEventPath = $"{plainEventPath}?conferenceDataVersion=1";
 
-        var created = await SendGoogleAsync<GoogleCalendarEventResponse>(
-            HttpMethod.Post,
-            path,
-            eventPayload,
-            cancellationToken);
+        GoogleCalendarEventResponse created;
+
+        if (createMeet)
+        {
+            try
+            {
+                created = await SendGoogleAsync<GoogleCalendarEventResponse>(
+                    HttpMethod.Post,
+                    conferenceEventPath,
+                    BuildEventPayload(draft, createMeet: true),
+                    cancellationToken);
+            }
+            catch (ApiException exception) when (IsInvalidConferenceTypeError(exception))
+            {
+                logger.LogWarning(
+                    exception,
+                    "Google Calendar rejected Meet conference creation. Falling back to a plain calendar event for {Email}.",
+                    draft.Email);
+
+                created = await SendGoogleAsync<GoogleCalendarEventResponse>(
+                    HttpMethod.Post,
+                    plainEventPath,
+                    BuildEventPayload(draft, createMeet: false),
+                    cancellationToken);
+            }
+        }
+        else
+        {
+            created = await SendGoogleAsync<GoogleCalendarEventResponse>(
+                HttpMethod.Post,
+                plainEventPath,
+                BuildEventPayload(draft, createMeet: false),
+                cancellationToken);
+        }
 
         var meetingUrl = created.HangoutLink
             ?? created.ConferenceData?.EntryPoints?.FirstOrDefault(entry => entry.EntryPointType == "video")?.Uri;
@@ -279,6 +308,11 @@ public sealed class GoogleCalendarClient(
             .TrimEnd('=')
             .Replace("+", "-", StringComparison.Ordinal)
             .Replace("/", "_", StringComparison.Ordinal);
+    }
+
+    private static bool IsInvalidConferenceTypeError(ApiException exception)
+    {
+        return exception.Message.Contains("Invalid conference type value", StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed record GoogleTokenResponse(
