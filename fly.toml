@@ -1,0 +1,30 @@
+app = "swiftmere-booking-api"
+primary_region = "cdg"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  ASPNETCORE_URLS = "http://+:8080"
+  Booking__TimeZone = "Europe/Madrid"
+  Booking__DurationMinutes = "30"
+  Booking__IntervalMinutes = "30"
+  Booking__LookaheadDays = "14"
+  Booking__MinNoticeMinutes = "120"
+  Booking__WorkdayStart = "09:00"
+  Booking__WorkdayEnd = "17:00"
+  Cors__AllowedOrigins__0 = "https://swiftmere.com"
+  Cors__AllowedOrigins__1 = "https://swift-mere-landing.vercel.app"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1

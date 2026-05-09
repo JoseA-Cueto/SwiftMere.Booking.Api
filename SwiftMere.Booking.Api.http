@@ -1,0 +1,27 @@
+@SwiftMere.Booking.Api_HostAddress = http://localhost:5293
+
+GET {{SwiftMere.Booking.Api_HostAddress}}/health
+Accept: application/json
+
+###
+
+GET {{SwiftMere.Booking.Api_HostAddress}}/api/availability?days=14
+Accept: application/json
+
+###
+
+POST {{SwiftMere.Booking.Api_HostAddress}}/api/bookings
+Content-Type: application/json
+
+{
+  "start": "2026-05-12T10:00:00Z",
+  "name": "Jose",
+  "email": "jose@example.com",
+  "company": "Swiftmere",
+  "phone": "+34 600 000 000",
+  "notes": "Quiero hablar de un MVP",
+  "meetingType": "google_meet",
+  "lang": "es"
+}
+
+###

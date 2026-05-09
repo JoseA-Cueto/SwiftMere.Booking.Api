@@ -1,0 +1,11 @@
+bin/
+obj/
+artifacts/
+.git/
+.vs/
+.vscode/
+*.user
+*.suo
+*.log
+appsettings.Local.json
+appsettings.*.local.json
